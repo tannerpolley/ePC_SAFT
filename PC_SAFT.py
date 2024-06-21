@@ -28,13 +28,18 @@ class PCSAFT:
     R = 8.314  # J/mol-K
     π = np.pi
 
-    def __init__(self, T, z, m, σ, ϵ_k, k_ij, η=None, phase='liquid', P_sys=None, κ_AB=None, ϵ_AB_k=None, find_η_bool=False):
+    def __init__(self, T, z, m, σ, ϵ_k, k_ij, η=None, phase='liquid', P_sys=None, κ_AB=None, ϵ_AB_k=None):
 
         # Parameters
         self.T = T
         self.z = z
         self.m = m
         self.k = len(σ)
+        self.σ = σ
+        self.ϵ_k = ϵ_k
+        self.κ_AB = κ_AB
+        self.ϵ_AB_k = ϵ_AB_k
+        self.k = len(z)
         k = self.k
 
         if κ_AB is None:
@@ -74,6 +79,8 @@ class PCSAFT:
 
     def d(self):
         T = self.T
+        σ = self.σ
+        ϵ_k = self.ϵ_k
 
         return σ * (1 - .12 * np.exp(-3 * ϵ_k / T))
 
@@ -83,7 +90,9 @@ class PCSAFT:
         η = self.η
         d = self.d()
         m = self.m
-        return 6 / self.π * η * (sum([z[i] * m[i] * d[i] ** 3 for i in range(self.k)])) ** (-1)
+        k = self.k
+
+        return 6 / self.π * η * (sum([z[i] * m[i] * d[i] ** 3 for i in range(k)])) ** (-1)
 
     def v(self):
 
@@ -189,6 +198,7 @@ class PCSAFT:
         z = self.z
         k = self.k
         ρ = self.ρ()
+        ϵ_AB_k = self.ϵ_AB_k
         Δ_AB_ij = self.Δ_AB_ij()
 
         def XA_find(XA_guess, n, Δ_AB_ij, ρ, z):
@@ -385,106 +395,49 @@ class PCSAFT:
         return np.exp(μ_res / self.kb / T - np.log(Z))
 
 
-def BPT(T, x, m, σ, ϵ_k, k_ij, yg, Pg, κ_AB=None, ϵ_AB_k=None):
+def flash(x, y, T, P, m, σ, ϵ_k, k_ij, flash_type='Bubble_T', κ_AB=None, ϵ_AB_k=None):
 
-    def f(z):
-        y1, y2, y3, P = z
-
-        y = [y1, y2, y3]
+    def eqs_to_solve(x, y, T, P, flash_type):
 
         mix_l = PCSAFT(T, x, m, σ, ϵ_k, k_ij, phase='liquid', P_sys=P, κ_AB=κ_AB, ϵ_AB_k=ϵ_AB_k)
-        mix_l.find_η()
         mix_v = PCSAFT(T, y, m, σ, ϵ_k, k_ij, phase='vapor', P_sys=P, κ_AB=κ_AB, ϵ_AB_k=ϵ_AB_k)
-        mix_v.find_η()
 
         φ_l = mix_l.φ()
         φ_v = mix_v.φ()
 
         eqs = [(y[i] * φ_v[i] - x[i] * φ_l[i]) for i in range(len(y))]
-        eqs.append(1 - np.sum([y[i] for i in range(len(y))]))
+        if flash_type[:-2] == 'Bubble':
+            eqs.append(1 - np.sum([y[i] for i in range(len(y))]))
+        elif flash_type[:-2] == 'Dew':
+            eqs.append(1 - np.sum([x[i] for i in range(len(x))]))
+        else:
+            print('Wrong Flash Type')
 
         return eqs
 
-    zg = yg
-    zg.append(Pg)
+    def f(w):
+        if flash_type == 'Bubble_T':
+            return eqs_to_solve(x, w[:-1], T, w[-1], flash_type)
+        elif flash_type == 'Bubble_P':
+            return eqs_to_solve(x, w[:-1], w[-1], P, flash_type)
+        elif flash_type == 'Dew_T':
+            return eqs_to_solve(w[:-1], y, T, w[-1], flash_type)
+        elif flash_type == 'Dew_P':
+            return eqs_to_solve(w[:-1], y, w[-1], P, flash_type)
+        else:
+            print('Wrong Flash Type')
+            return None
 
-    ans = root(f, zg).x
-
-    y = ans[:-1]
-    P = ans[-1]
-
-    return y, P
-
-#%%
-
-#
-# T = 233.15
-# x = np.array([.1, .3, .6])  # Mole fraction
-# m = np.array([1, 1.6069, 2.0020])  # Number of segments
-# σ = np.array([3.7039, 3.5206, 3.6184])  # Temperature-Independent segment diameter σ_i (Aᵒ)
-# ϵ_k = np.array([150.03, 191.42, 208.11])  # Depth of pair potential / Boltzmann constant (K)
-# k_ij = np.array([[0.00E+00, 3.00E-04, 1.15E-02],
-#                  [3.00E-04, 0.00E+00, 5.10E-03],
-#                  [1.15E-02, 5.10E-03, 0.00E+00]])
-# κ_AB = np.array([0, 0, 0])
-# ϵ_AB_k = np.array([0, 0, 0])
-# P_sys = 916372.96423737
-# mix_l = PCSAFT(T, x, m, σ, ϵ_k, k_ij, phase='liquid', P_sys=P_sys)
-# yg = [.67, .23, .10]
-# Pg = P_sys
-# y, P = BPT(T, x, m, σ, ϵ_k, k_ij, yg, Pg)
-# print(y, P)
-
-#%%
-
-MW_CO2 = 44.01/1000
-MW_MEA = 61.08/1000
-MW_H2O = 18.02/1000
-
-def get_x(α, w_MEA):
-
-    x_MEA = ((1 + α + (MW_MEA/MW_H2O))*(1-w_MEA)/w_MEA)**-1
-    x_CO2 = x_MEA*α
-    x_H2O = 1 - x_CO2 - x_MEA
-
-    return [x_CO2, x_MEA, x_H2O]
-
-
-T = 393 # K
-w_MEA = .30
-α = .4
-x = get_x(α, w_MEA)
-x = [.04, .1, .86]
-y = [.1, .013, .818, .069]
-
-# 2B Association Scheme
-x = [.04, .1, .86]
-m = np.array([2.0729, 3.0353, 1.9599])  # Number of segments
-σ = np.array([2.7852, 3.0435, 2.362])  # Temperature-Independent segment diameter σ_i (Aᵒ)
-ϵ_k = np.array([169.21, 277.174, 279.42]) # Depth of pair potential / Boltzmann constant (K)
-k_ij = np.array([[0.0, .16, .065],
-                 [.16, 0.0, -.18],
-                 [.065, -.18, 0.0]])
-κ_AB = np.array([0, .037470, .2039])
-ϵ_AB_k = np.array([0, 2586.3, 2059.28])
-
-P_sys = 109180
-#
-mix_l = PCSAFT(T, x, m, σ, ϵ_k, k_ij, phase='liquid', P_sys=P_sys, κ_AB=κ_AB, ϵ_AB_k=ϵ_AB_k)
-print(mix_l.φ())
-
-# Vapor
-y = [.1, .013, .818, .069]
-m = np.array([2.0729, 1.9599, 1.2053, 1.1335])  # Number of segments
-σ = np.array([2.7852, 2.362, 3.3130, 3.1947])  # Temperature-Independent segment diameter σ_i (Aᵒ)
-ϵ_k = np.array([169.21, 279.42, 90.96, 114.43]) # Depth of pair potential / Boltzmann constant (K)
-k_ij = np.array([[0.0,   .065, -.0149, -.04838],
-                 [.065,   0.0,    0.0, 0.0],
-                 [-.0149, 0.0,    0.0, 0.0],
-                 [-.04838, 0.0, 0.0, -.00978]])
-
-κ_AB = np.array([0, 0, 0, 0])
-ϵ_AB_k = np.array([0, 0, 0, 0])
-
-mix_v = PCSAFT(T, y, m, σ, ϵ_k, k_ij, phase='vapor', P_sys=P_sys, κ_AB=κ_AB, ϵ_AB_k=ϵ_AB_k)
-print(mix_v.φ())
+    if flash_type == 'Bubble_T':
+        guesses = list(y) + [P]
+    elif flash_type == 'Bubble_P':
+        guesses = list(y) + [T]
+    elif flash_type == 'Dew_T':
+        guesses = list(x) + [P]
+    elif flash_type == 'Dew_P':
+        guesses = list(x) + [T]
+    else:
+        print('Wrong Flash Type')
+        guesses = []
+    ans = root(f, np.array([guesses])).x
+    return ans[:-1], ans[-1]
