@@ -32,7 +32,9 @@ class PCSAFT:
 
         # Parameters
         self.T = T
+        self.T_og = T
         self.z = z
+        self.z_og = z
         self.m = m
         self.k = len(σ)
         self.σ = σ
@@ -40,6 +42,11 @@ class PCSAFT:
         self.κ_AB = κ_AB
         self.ϵ_AB_k = ϵ_AB_k
         self.k = len(z)
+        self.η_diff = False
+        self.T_diff = False
+        self.x_diff = False
+        self.d_static = σ * (1 - .12 * np.exp(-3 * ϵ_k / T))
+
         k = self.k
 
         if κ_AB is None:
@@ -84,14 +91,21 @@ class PCSAFT:
 
         return σ * (1 - .12 * np.exp(-3 * ϵ_k / T))
 
+    def d_og(self):
+        T = self.T_og
+        σ = self.σ
+        ϵ_k = self.ϵ_k
+
+        return σ * (1 - .12 * np.exp(-3 * ϵ_k / T))
+
     def ρ(self):
 
-        z = self.z
+        z = self.z_og
+        z = [.1, .3, .6]
         η = self.η
-        d = self.d()
+        d = self.d_static
         m = self.m
         k = self.k
-
         return 6 / self.π * η * (sum([z[i] * m[i] * d[i] ** 3 for i in range(k)])) ** (-1)
 
     def v(self):
@@ -151,7 +165,7 @@ class PCSAFT:
 
         T = self.T
         z = self.z
-        η = self.η
+        η = self.ξ()[-1]
 
         a_ni = self.a_ni
         b_ni = self.b_ni
@@ -191,7 +205,7 @@ class PCSAFT:
         C1 = (1 + m̄ * (8 * η - 2 * η ** 2) / (1 - η) ** 4 + (1 - m̄) * (
                     20 * η - 27 * η ** 2 + 12 * η ** 3 - 2 * η ** 4) / ((1 - η) * (2 - η)) ** 2) ** -1
 
-        return np.round(-2 * π * ρ * I1 * Σ_1 - π * ρ * m̄ * C1 * I2 * Σ_2, 15)
+        return -2 * π * ρ * I1 * Σ_1 - π * ρ * m̄ * C1 * I2 * Σ_2
 
     def a_assoc(self):
 
@@ -233,8 +247,6 @@ class PCSAFT:
             XA_old[:] = XA
         XA = XA.flatten()
 
-        # print([z[i] * sum([np.log(XA[j] - 1 / 2 * XA[j] + 1 / 2) for j in range(len(XA))]) for i in range(k)])
-
         return sum([z[i] * sum([np.log(XA[j] - 1 / 2 * XA[j] + 1 / 2) for j in range(len(XA))]) for i in range(k)])
 
     def a_ion(self):
@@ -267,7 +279,6 @@ class PCSAFT:
 
         z = self.z
         self.z_og = self.z
-
         da_dx = []
         for k in range(len(z)):
 
@@ -281,11 +292,14 @@ class PCSAFT:
                         z_new.append(z[i])
 
                 self.z = z_new
+
                 return self.a_res()
+
 
             self.z = self.z_og
 
             da_dx.append(nd.Derivative(f)(z[k]))
+
         self.z = self.z_og
 
         return np.array(da_dx)
@@ -300,7 +314,6 @@ class PCSAFT:
             return self.a_res()
 
         self.T = self.T_og
-
         return nd.Derivative(f)(T)
 
     def Z(self):
@@ -364,7 +377,7 @@ class PCSAFT:
 
         self.T = self.T_og
 
-        return -T * (da_dT(T) + a_res / T) + np.log(Z)
+        return -T * (da_dT + a_res / T) + np.log(Z)
 
     def g_res(self):
         a_res = self.a_res()
